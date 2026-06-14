@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chat Now - 管理画面</title>
+<style>
+  * { box-sizing: border-box; font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif; }
+  body { margin: 0; background: #f4f5f7; color: #222; }
+  header { background: #4a47e0; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 1.2rem; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .toolbar select, .toolbar button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 0.9rem; }
+  .toolbar button { background: #4a47e0; color: white; border: none; cursor: pointer; }
+  .report { background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .report-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px; }
+  .report-head .meta { font-size: 0.85rem; color: #777; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem; }
+  .badge.open { background: #ffe1e1; color: #c0392b; }
+  .badge.resolved { background: #e1ffe6; color: #1e8449; }
+  .reason { margin: 6px 0 10px; font-size: 0.95rem; }
+  .transcript { background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 10px; max-height: 220px; overflow-y: auto; font-size: 0.85rem; }
+  .transcript .line { margin-bottom: 4px; }
+  .transcript .reporter { color: #c0392b; }
+  .transcript .partner { color: #2980b9; }
+  .transcript .time { color: #aaa; font-size: 0.75rem; margin-right: 6px; }
+  .actions { margin-top: 10px; display: flex; gap: 8px; }
+  .actions button { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; }
+  .resolve-btn { background: #4a47e0; color: white; }
+  .reopen-btn { background: #ddd; color: #333; }
+  .empty { text-align: center; color: #999; padding: 40px 0; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Chat Now - 通報管理画面</h1>
+  </header>
+  <main>
+    <div class="toolbar">
+      <select id="filter">
+        <option value="all">すべて表示</option>
+        <option value="open" selected>未対応のみ</option>
+        <option value="resolved">対応済みのみ</option>
+      </select>
+      <button id="reloadBtn">再読み込み</button>
+    </div>
+    <div id="list"></div>
+  </main>
+
+  <script>
+    const listEl = document.getElementById('list');
+    const filterEl = document.getElementById('filter');
+    const reloadBtn = document.getElementById('reloadBtn');
+
+    function fmtTime(ts) {
+      const d = new Date(ts);
+      return d.toLocaleString('ja-JP');
+    }
+
+    async function loadReports() {
+      listEl.innerHTML = '<div class="empty">読み込み中...</div>';
+      try {
+        const res = await fetch('/admin/api/reports');
+        const data = await res.json();
+        render(data.reports || []);
+      } catch (e) {
+        listEl.innerHTML = '<div class="empty">読み込みに失敗しました</div>';
+      }
+    }
+
+    function render(reports) {
+      const filter = filterEl.value;
+      const filtered = reports.filter((r) => filter === 'all' || r.status === filter);
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = '<div class="empty">該当する通報はありません</div>';
+        return;
+      }
+
+      listEl.innerHTML = '';
+      filtered.forEach((r) => {
+        const div = document.createElement('div');
+        div.className = 'report';
+
+        const transcriptHtml = (r.transcript || []).map((m) => {
+          const cls = m.from === '通報者' ? 'reporter' : 'partner';
+          return `<div class="line"><span class="time">${fmtTime(m.time)}</span><span class="${cls}">[${m.from}]</span> ${escapeHtml(m.text)}</div>`;
+        }).join('') || '<div class="line">(会話ログはありません)</div>';
+
+        div.innerHTML = `
+          <div class="report-head">
+            <div class="meta">通報時刻: ${fmtTime(r.time)} / ID: ${r.id}</div>
+            <span class="badge ${r.status}">${r.status === 'open' ? '未対応' : '対応済み'}</span>
+          </div>
+          <div class="reason"><strong>通報理由:</strong> ${escapeHtml(r.reason) || '(理由の記載なし)'}</div>
+          <div class="transcript">${transcriptHtml}</div>
+          <div class="actions">
+            ${r.status === 'open'
+              ? `<button class="resolve-btn" data-id="${r.id}" data-status="resolved">対応済みにする</button>`
+              : `<button class="reopen-btn" data-id="${r.id}" data-status="open">未対応に戻す</button>`}
+          </div>
+        `;
+        listEl.appendChild(div);
+      });
+
+      listEl.querySelectorAll('button[data-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const status = btn.dataset.status;
+          await fetch(`/admin/api/reports/${id}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+          });
+          loadReports();
+        });
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    filterEl.addEventListener('change', loadReports);
+    reloadBtn.addEventListener('click', loadReports);
+    loadReports();
+  </script>
+</body>
+</html>
