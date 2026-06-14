@@ -30,6 +30,8 @@
   .resolve-btn { background: #4a47e0; color: white; }
   .reopen-btn { background: #ddd; color: #333; }
   .empty { text-align: center; color: #999; padding: 40px 0; }
+  .stats { display: flex; gap: 24px; background: white; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); font-size: 0.9rem; }
+  .stats .item strong { font-size: 1.1rem; color: #4a47e0; margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -37,6 +39,11 @@
     <h1>Chat Now - 通報管理画面</h1>
   </header>
   <main>
+    <div class="stats" id="stats">
+      <div class="item">オンライン: <strong id="statOnline">-</strong>人</div>
+      <div class="item">待機中: <strong id="statWaiting">-</strong>人</div>
+      <div class="item">チャット中: <strong id="statChatting">-</strong>組</div>
+    </div>
     <div class="toolbar">
       <select id="filter">
         <option value="all">すべて表示</option>
@@ -126,9 +133,23 @@
         .replace(/"/g, '&quot;');
     }
 
+    async function loadStats() {
+      try {
+        const res = await fetch('/admin/api/stats');
+        const data = await res.json();
+        document.getElementById('statOnline').textContent = data.online;
+        document.getElementById('statWaiting').textContent = data.waiting;
+        document.getElementById('statChatting').textContent = data.chatting;
+      } catch (e) {
+        // ignore
+      }
+    }
+
     filterEl.addEventListener('change', loadReports);
-    reloadBtn.addEventListener('click', loadReports);
+    reloadBtn.addEventListener('click', () => { loadReports(); loadStats(); });
     loadReports();
+    loadStats();
+    setInterval(loadStats, 5000);
   </script>
 </body>
 </html>
