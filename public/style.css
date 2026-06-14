@@ -231,6 +231,10 @@ body {
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
+.affiliate-box.hidden {
+  display: none;
+}
+
 .affiliate-box h3 {
   margin-top: 0;
 }

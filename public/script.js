@@ -1,5 +1,7 @@
 const statusBadge = document.getElementById('statusBadge');
 const onlineCountEl = document.getElementById('onlineCount');
+const affiliateBox = document.getElementById('affiliateBox');
+const affLink = document.getElementById('affLink');
 const startScreen = document.getElementById('startScreen');
 const chatScreen = document.getElementById('chatScreen');
 const chatStatus = document.getElementById('chatStatus');
@@ -198,3 +200,25 @@ async function updateOnlineCount() {
 
 updateOnlineCount();
 setInterval(updateOnlineCount, 5000);
+
+// アフィリエイトリンク(サイドバー「おすすめ」欄)を取得して表示
+// サーバー側で15分ごとに表示するリンクが切り替わる
+async function updateAffiliate() {
+  try {
+    const res = await fetch('/api/affiliate');
+    if (!res.ok) throw new Error('failed');
+    const data = await res.json();
+    if (data.link) {
+      affiliateBox.classList.remove('hidden');
+      affLink.textContent = `${data.link.text} →`;
+      affLink.href = data.link.url;
+    } else {
+      affiliateBox.classList.add('hidden');
+    }
+  } catch (e) {
+    // 取得失敗時は何もしない
+  }
+}
+
+updateAffiliate();
+setInterval(updateAffiliate, 60 * 1000);
