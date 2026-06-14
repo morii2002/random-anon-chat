@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chat Now - 匿名ランダムチャット | 名前登録不要のランダムマッチングチャット</title>
+<meta name="description" content="Chat Now は名前登録不要の匿名1対1ランダムチャットサービスです。ボタンひとつでランダムな相手とテキストチャットを開始できます。18歳以上対象。" />
+<link rel="canonical" href="https://random-anon-chat.onrender.com/" />
+<meta property="og:title" content="Chat Now - 匿名ランダムチャット" />
+<meta property="og:description" content="名前登録不要。ボタンを押すとランダムな相手とテキストチャットが始まります。" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://random-anon-chat.onrender.com/" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="logo">Chat Now</div>
+    <div class="online-count" id="onlineCount">オンライン: -人</div>
+    <div class="status" id="statusBadge">未接続</div>
+  </header>
+
+  <!-- 上部広告枠 -->
+  <div class="ad-slot ad-top">広告枠(上部)</div>
+
+  <main class="layout">
+
+    <!-- スタート画面 -->
+    <section id="startScreen" class="panel">
+      <h1>匿名でランダムチャット</h1>
+      <p class="lead">名前登録不要。ボタンを押すとランダムな相手とテキストチャットが始まります。</p>
+
+      <label class="agree">
+        <input type="checkbox" id="agreeCheck" />
+        <span><a href="#" id="rulesLink">利用ルール・注意事項</a>に同意します(18歳未満の利用は禁止)</span>
+      </label>
+
+      <button id="startBtn" class="btn primary" disabled>ランダムマッチを開始</button>
+    </section>
+
+    <!-- チャット画面 -->
+    <section id="chatScreen" class="panel hidden">
+      <div class="chat-header">
+        <span id="chatStatus">マッチング中...</span>
+        <div class="chat-actions">
+          <button id="reportBtn" class="btn small">通報</button>
+          <button id="skipBtn" class="btn small">スキップ</button>
+          <button id="leaveBtn" class="btn small danger">終了</button>
+        </div>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <div id="typingIndicator" class="typing hidden">相手が入力中...</div>
+
+      <form id="messageForm" class="message-form">
+        <input id="messageInput" type="text" maxlength="1000" placeholder="メッセージを入力..." autocomplete="off" disabled />
+        <button type="submit" class="btn primary" disabled id="sendBtn">送信</button>
+      </form>
+    </section>
+
+    <!-- サイドバー広告/アフィリエイト -->
+    <aside class="sidebar">
+      <div class="ad-slot ad-side">広告枠(サイドバー)</div>
+      <div class="affiliate-box" id="affiliateBox">
+        <h3>おすすめ</h3>
+        <a href="#" id="affLink" class="aff-card" target="_blank" rel="noopener nofollow sponsored">
+          <img id="affImage" class="aff-card-img" alt="おすすめ" />
+          <div class="aff-card-content">
+            <div class="aff-card-title" id="affTitle"></div>
+            <div class="aff-card-desc" id="affDesc"></div>
+          </div>
+        </a>
+      </div>
+    </aside>
+  </main>
+
+  <!-- 下部広告枠 -->
+  <div class="ad-slot ad-bottom">広告枠(下部)</div>
+
+  <!-- ルールモーダル -->
+  <div id="rulesModal" class="modal hidden">
+    <div class="modal-content">
+      <h2>利用ルール・注意事項</h2>
+      <ul>
+        <li>本サービスは18歳以上の方のみご利用いただけます。</li>
+        <li>個人情報(本名、連絡先、住所等)のやり取りは禁止します。</li>
+        <li>違法行為、ハラスメント、わいせつな内容の送信を禁止します。</li>
+        <li>不適切な相手は「通報」ボタンで報告してください。</li>
+        <li>会話内容は記録・モニタリングされる場合があります。</li>
+      </ul>
+      <button id="closeRules" class="btn primary">閉じる</button>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>&copy; 2026 Chat Now. このサービスは18歳以上対象です。<a href="#" id="rulesLink2">利用規約</a></p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
