@@ -46,6 +46,16 @@
   .aff-item .info .u { color: #888; font-size: 0.8rem; word-break: break-all; }
   .aff-item .del-btn { background: #e05353; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 0.8rem; flex-shrink: 0; }
   .aff-empty { color: #999; font-size: 0.9rem; padding: 8px 0; }
+  .aff-url-form { display: flex; gap: 8px; margin-bottom: 14px; }
+  .aff-url-form input { flex: 1; min-width: 200px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.9rem; }
+  .aff-url-form button { background: #4a47e0; color: white; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 0.9rem; }
+  .aff-preview { background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 12px; margin-bottom: 14px; display: none; }
+  .aff-preview.show { display: block; }
+  .aff-preview-img { max-height: 150px; margin-bottom: 8px; border-radius: 6px; }
+  .aff-preview-meta { font-size: 0.9rem; }
+  .aff-preview-title { font-weight: bold; margin-bottom: 4px; }
+  .aff-preview-desc { color: #666; font-size: 0.85rem; margin-bottom: 4px; }
+  .aff-preview-url { color: #4a47e0; font-size: 0.8rem; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -60,12 +70,26 @@
     </div>
     <div class="section">
       <h2>アフィリエイトリンク管理(ユーザー画面サイドバー)</h2>
-      <p class="help">ここに登録したリンクが、ユーザー画面のサイドバー「おすすめ」欄に15分ごとに切り替わって表示されます。</p>
-      <form class="aff-form" id="affForm">
-        <input type="text" id="affText" placeholder="表示テキスト(例: おすすめサービスA)" maxlength="100" required />
-        <input type="url" id="affUrl" placeholder="リンクURL(https://...)" maxlength="500" required />
-        <button type="submit">追加</button>
-      </form>
+      <p class="help">URLを入力してOGP画像を自動取得。商品画像が見えるように表示されます。</p>
+
+      <!-- OGP画像取得フォーム -->
+      <div class="aff-url-form">
+        <input type="url" id="affOgpUrl" placeholder="URL (https://...)" />
+        <button type="button" id="affFetchOgpBtn">OGP取得</button>
+      </div>
+
+      <!-- OGP プレビュー -->
+      <div class="aff-preview" id="affPreview">
+        <img id="affPreviewImg" class="aff-preview-img" alt="プレビュー" />
+        <div class="aff-preview-meta">
+          <div class="aff-preview-title" id="affPreviewTitle"></div>
+          <div class="aff-preview-desc" id="affPreviewDesc"></div>
+          <div class="aff-preview-url" id="affPreviewUrl"></div>
+          <button type="button" id="affAddBtn" style="margin-top: 8px; padding: 6px 12px; background: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem;">この画像を追加</button>
+        </div>
+      </div>
+
+      <!-- 登録済みリスト -->
       <ul class="aff-list" id="affList"></ul>
     </div>
 
@@ -170,11 +194,18 @@
       }
     }
 
-    // ===== アフィリエイトリンク管理 =====
-    const affForm = document.getElementById('affForm');
-    const affTextEl = document.getElementById('affText');
-    const affUrlEl = document.getElementById('affUrl');
+    // ===== アフィリエイトリンク管理 (OGP画像版) =====
+    const affOgpUrlEl = document.getElementById('affOgpUrl');
+    const affFetchOgpBtn = document.getElementById('affFetchOgpBtn');
+    const affPreview = document.getElementById('affPreview');
+    const affPreviewImg = document.getElementById('affPreviewImg');
+    const affPreviewTitle = document.getElementById('affPreviewTitle');
+    const affPreviewDesc = document.getElementById('affPreviewDesc');
+    const affPreviewUrl = document.getElementById('affPreviewUrl');
+    const affAddBtn = document.getElementById('affAddBtn');
     const affListEl = document.getElementById('affList');
+
+    let currentOgpData = null; // OGP取得後の情報を一時保存
 
     async function loadAffiliates() {
       try {
@@ -195,9 +226,11 @@
       links.forEach((l) => {
         const li = document.createElement('li');
         li.className = 'aff-item';
+        const displayText = l.title || l.text || 'No title';
         li.innerHTML = `
           <div class="info">
-            <div class="t">${escapeHtml(l.text)}</div>
+            ${l.image ? `<img src="${escapeHtml(l.image)}" style="max-height: 40px; border-radius: 4px; margin-bottom: 4px;" />` : ''}
+            <div class="t">${escapeHtml(displayText)}</div>
             <div class="u">${escapeHtml(l.url)}</div>
           </div>
           <button class="del-btn" data-id="${l.id}">削除</button>
@@ -213,23 +246,87 @@
       });
     }
 
-    affForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const text = affTextEl.value.trim();
-      const url = affUrlEl.value.trim();
-      if (!text || !url) return;
-      const res = await fetch('/admin/api/affiliates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, url }),
-      });
-      if (res.ok) {
-        affTextEl.value = '';
-        affUrlEl.value = '';
-        loadAffiliates();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || '追加に失敗しました');
+    // OGP情報取得
+    affFetchOgpBtn.addEventListener('click', async () => {
+      const url = affOgpUrlEl.value.trim();
+      if (!url) {
+        alert('URLを入力してください');
+        return;
+      }
+
+      affFetchOgpBtn.disabled = true;
+      affFetchOgpBtn.textContent = '取得中...';
+
+      try {
+        const res = await fetch('/api/fetch-ogp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+
+        if (!res.ok) {
+          throw new Error('OGP取得失敗');
+        }
+
+        const data = await res.json();
+        if (data.ok && data.ogp) {
+          currentOgpData = { ...data.ogp, url };
+
+          // プレビュー表示
+          affPreviewImg.src = data.ogp.image || '';
+          affPreviewTitle.textContent = data.ogp.title || '(タイトルなし)';
+          affPreviewDesc.textContent = data.ogp.description || '(説明なし)';
+          affPreviewUrl.textContent = url;
+          affPreview.classList.add('show');
+        } else {
+          throw new Error(data.error || 'OGP情報がありません');
+        }
+      } catch (err) {
+        alert('OGP取得に失敗: ' + err.message);
+        affPreview.classList.remove('show');
+      } finally {
+        affFetchOgpBtn.disabled = false;
+        affFetchOgpBtn.textContent = 'OGP取得';
+      }
+    });
+
+    // OGP情報を登録
+    affAddBtn.addEventListener('click', async () => {
+      if (!currentOgpData) {
+        alert('先にOGP取得を実行してください');
+        return;
+      }
+
+      affAddBtn.disabled = true;
+      affAddBtn.textContent = '追加中...';
+
+      try {
+        const res = await fetch('/admin/api/affiliates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: currentOgpData.title,
+            image: currentOgpData.image,
+            description: currentOgpData.description,
+            url: currentOgpData.url,
+          }),
+        });
+
+        if (res.ok) {
+          affOgpUrlEl.value = '';
+          affPreview.classList.remove('show');
+          currentOgpData = null;
+          loadAffiliates();
+          alert('追加しました');
+        } else {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || '追加失敗');
+        }
+      } catch (err) {
+        alert('追加に失敗: ' + err.message);
+      } finally {
+        affAddBtn.disabled = false;
+        affAddBtn.textContent = 'この画像を追加';
       }
     });
 
