@@ -6,6 +6,7 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
+const cheerio = require('cheerio');
 
 const app = express();
 app.use(express.json());
@@ -268,6 +269,95 @@ app.get('/api/stats', (req, res) => {
   res.json({ online: clients.size });
 });
 
+// ===== OGP情報取得 =====
+// URLからog:image, og:title, og:descriptionを取得（管理画面から呼ばれる）
+app.post('/api/fetch-ogp', (req, res) => {
+  const url = String((req.body && req.body.url) || '').trim();
+
+  if (!url) {
+    return res.status(400).json({ error: 'url is required' });
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: 'url must start with http:// or https://' });
+  }
+
+  console.log(`[OGP] Fetching: ${url}`);
+
+  // URLスキームに応じてhttpまたはhttpsを使う
+  const isHttps = url.startsWith('https');
+  const httpModule = isHttps ? require('https') : require('http');
+
+  function fetchUrl(targetUrl, redirectCount = 0) {
+    if (redirectCount > 5) {
+      console.log('[OGP] Too many redirects');
+      return res.status(400).json({ error: 'Too many redirects' });
+    }
+
+    try {
+      const targetIsHttps = targetUrl.startsWith('https');
+      const targetHttpModule = targetIsHttps ? require('https') : require('http');
+
+      targetHttpModule.get(targetUrl, {
+        timeout: 5000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        maxRedirects: 0
+      }, (response) => {
+        console.log(`[OGP] Status: ${response.statusCode}`);
+
+        // リダイレクト処理
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          console.log(`[OGP] Redirecting to: ${response.headers.location}`);
+          return fetchUrl(response.headers.location, redirectCount + 1);
+        }
+
+        if (response.statusCode !== 200) {
+          console.log(`[OGP] Non-200 status: ${response.statusCode}`);
+          return res.status(400).json({ error: `HTTP ${response.statusCode}` });
+        }
+
+        let data = '';
+        response.on('data', (chunk) => {
+          data += chunk;
+          if (data.length > 1000000) { // 1MB超えたら中断
+            response.destroy();
+          }
+        });
+
+        response.on('end', () => {
+          try {
+            console.log(`[OGP] Received ${data.length} bytes`);
+            const $ = cheerio.load(data);
+            const ogImage = $('meta[property="og:image"]').attr('content') || '';
+            const ogTitle = $('meta[property="og:title"]').attr('content') || '';
+            const ogDescription = $('meta[property="og:description"]').attr('content') || '';
+
+            console.log(`[OGP] Success - title: "${ogTitle}" image: "${ogImage}"`);
+            res.json({
+              ok: true,
+              ogp: {
+                image: ogImage,
+                title: ogTitle,
+                description: ogDescription,
+              },
+            });
+          } catch (err) {
+            console.log(`[OGP] Parse error: ${err.message}`);
+            res.status(400).json({ error: 'Failed to parse HTML' });
+          }
+        });
+      }).on('error', (err) => {
+        console.log(`[OGP] Fetch error: ${err.message}`);
+        res.status(400).json({ error: `Fetch error: ${err.message}` });
+      });
+    } catch (err) {
+      console.log(`[OGP] Exception: ${err.message}`);
+      res.status(400).json({ error: `Exception: ${err.message}` });
+    }
+  }
+
+  fetchUrl(url);
+});
+
 // 管理画面向けの詳細な利用状況
 app.get('/admin/api/stats', basicAuth, (req, res) => {
   res.json({
@@ -316,19 +406,30 @@ app.get('/admin/api/affiliates', basicAuth, (req, res) => {
   res.json({ links: affiliateLinks });
 });
 
-// 管理画面: アフィリエイトリンク追加
+// 管理画面: アフィリエイトリンク追加（OGP対応版）
 app.post('/admin/api/affiliates', basicAuth, (req, res) => {
-  const text = String((req.body && req.body.text) || '').trim().slice(0, 100);
+  const title = String((req.body && req.body.title) || '').trim().slice(0, 200);
+  const image = String((req.body && req.body.image) || '').trim().slice(0, 500);
+  const description = String((req.body && req.body.description) || '').trim().slice(0, 300);
   const url = String((req.body && req.body.url) || '').trim().slice(0, 500);
 
-  if (!text || !url) {
-    return res.status(400).json({ error: 'text and url are required' });
+  if (!url) {
+    return res.status(400).json({ error: 'url is required' });
   }
   if (!/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: 'url must start with http:// or https://' });
   }
 
-  const link = { id: crypto.randomUUID(), text, url };
+  // 後方互換性: titleがない場合は古い形式のtext/urlで対応
+  const link = {
+    id: crypto.randomUUID(),
+    title: title || 'Link',
+    image,
+    description,
+    url,
+    // 古い形式用（互換性維持）
+    text: title || 'Link',
+  };
   affiliateLinks.push(link);
   res.json({ ok: true, link });
 });
