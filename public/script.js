@@ -1,4 +1,5 @@
 const statusBadge = document.getElementById('statusBadge');
+const onlineCountEl = document.getElementById('onlineCount');
 const startScreen = document.getElementById('startScreen');
 const chatScreen = document.getElementById('chatScreen');
 const chatStatus = document.getElementById('chatStatus');
@@ -182,3 +183,18 @@ reportBtn.addEventListener('click', () => {
   const reason = prompt('通報理由を入力してください(任意):') || '';
   ws.send(JSON.stringify({ type: 'report', reason }));
 });
+
+// 現在の利用者数(オンライン人数)を定期的に取得して表示
+async function updateOnlineCount() {
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) throw new Error('failed');
+    const data = await res.json();
+    onlineCountEl.textContent = `オンライン: ${data.online}人`;
+  } catch (e) {
+    onlineCountEl.textContent = 'オンライン: -人';
+  }
+}
+
+updateOnlineCount();
+setInterval(updateOnlineCount, 5000);

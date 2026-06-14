@@ -33,6 +33,13 @@ body {
   border-radius: 12px;
 }
 
+.online-count {
+  font-size: 0.85rem;
+  background: rgba(255,255,255,0.15);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
 .ad-slot {
   background: #e0e0e0;
   border: 1px dashed #aaa;
