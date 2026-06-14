@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(express.json());
@@ -271,7 +272,8 @@ app.get('/api/stats', (req, res) => {
 
 // ===== OGP情報取得 =====
 // URLからog:image, og:title, og:descriptionを取得（管理画面から呼ばれる）
-app.post('/api/fetch-ogp', (req, res) => {
+// 最初は cheerio で試し、OGP が見つからなければ Puppeteer を使う
+app.post('/api/fetch-ogp', async (req, res) => {
   const url = String((req.body && req.body.url) || '').trim();
 
   if (!url) {
@@ -283,79 +285,135 @@ app.post('/api/fetch-ogp', (req, res) => {
 
   console.log(`[OGP] Fetching: ${url}`);
 
-  // URLスキームに応じてhttpまたはhttpsを使う
-  const isHttps = url.startsWith('https');
-  const httpModule = isHttps ? require('https') : require('http');
-
-  function fetchUrl(targetUrl, redirectCount = 0) {
+  // まず cheerio で試す（軽量）
+  async function fetchWithCheerio(targetUrl, redirectCount = 0) {
     if (redirectCount > 5) {
       console.log('[OGP] Too many redirects');
-      return res.status(400).json({ error: 'Too many redirects' });
+      return null;
     }
 
     try {
       const targetIsHttps = targetUrl.startsWith('https');
       const targetHttpModule = targetIsHttps ? require('https') : require('http');
 
-      targetHttpModule.get(targetUrl, {
-        timeout: 5000,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        maxRedirects: 0
-      }, (response) => {
-        console.log(`[OGP] Status: ${response.statusCode}`);
+      return new Promise((resolve, reject) => {
+        targetHttpModule.get(targetUrl, {
+          timeout: 5000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+          maxRedirects: 0
+        }, (response) => {
+          console.log(`[OGP] Cheerio Status: ${response.statusCode}`);
 
-        // リダイレクト処理
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          console.log(`[OGP] Redirecting to: ${response.headers.location}`);
-          return fetchUrl(response.headers.location, redirectCount + 1);
-        }
-
-        if (response.statusCode !== 200) {
-          console.log(`[OGP] Non-200 status: ${response.statusCode}`);
-          return res.status(400).json({ error: `HTTP ${response.statusCode}` });
-        }
-
-        let data = '';
-        response.on('data', (chunk) => {
-          data += chunk;
-          if (data.length > 1000000) { // 1MB超えたら中断
-            response.destroy();
+          if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+            console.log(`[OGP] Cheerio redirecting to: ${response.headers.location}`);
+            return fetchWithCheerio(response.headers.location, redirectCount + 1).then(resolve).catch(reject);
           }
-        });
 
-        response.on('end', () => {
-          try {
-            console.log(`[OGP] Received ${data.length} bytes`);
-            const $ = cheerio.load(data);
-            const ogImage = $('meta[property="og:image"]').attr('content') || '';
-            const ogTitle = $('meta[property="og:title"]').attr('content') || '';
-            const ogDescription = $('meta[property="og:description"]').attr('content') || '';
-
-            console.log(`[OGP] Success - title: "${ogTitle}" image: "${ogImage}"`);
-            res.json({
-              ok: true,
-              ogp: {
-                image: ogImage,
-                title: ogTitle,
-                description: ogDescription,
-              },
-            });
-          } catch (err) {
-            console.log(`[OGP] Parse error: ${err.message}`);
-            res.status(400).json({ error: 'Failed to parse HTML' });
+          if (response.statusCode !== 200) {
+            console.log(`[OGP] Non-200 status: ${response.statusCode}`);
+            return resolve(null);
           }
+
+          let data = '';
+          response.on('data', (chunk) => {
+            data += chunk;
+            if (data.length > 1000000) response.destroy();
+          });
+
+          response.on('end', () => {
+            try {
+              console.log(`[OGP] Cheerio received ${data.length} bytes`);
+              const $ = cheerio.load(data);
+              const ogImage = $('meta[property="og:image"]').attr('content') || '';
+              const ogTitle = $('meta[property="og:title"]').attr('content') || '';
+              const ogDescription = $('meta[property="og:description"]').attr('content') || '';
+
+              if (ogImage || ogTitle) {
+                console.log(`[OGP] Cheerio Success - title: "${ogTitle}"`);
+                resolve({ image: ogImage, title: ogTitle, description: ogDescription });
+              } else {
+                console.log('[OGP] No OGP found with Cheerio, will try Puppeteer');
+                resolve(null);
+              }
+            } catch (err) {
+              console.log(`[OGP] Cheerio parse error: ${err.message}`);
+              resolve(null);
+            }
+          });
+        }).on('error', (err) => {
+          console.log(`[OGP] Cheerio fetch error: ${err.message}`);
+          resolve(null);
         });
-      }).on('error', (err) => {
-        console.log(`[OGP] Fetch error: ${err.message}`);
-        res.status(400).json({ error: `Fetch error: ${err.message}` });
       });
     } catch (err) {
-      console.log(`[OGP] Exception: ${err.message}`);
-      res.status(400).json({ error: `Exception: ${err.message}` });
+      console.log(`[OGP] Cheerio exception: ${err.message}`);
+      return null;
     }
   }
 
-  fetchUrl(url);
+  // Puppeteer を使用（JavaScript レンダリング対応）
+  async function fetchWithPuppeteer(targetUrl) {
+    let browser = null;
+    try {
+      console.log('[OGP] Starting Puppeteer');
+      browser = await puppeteer.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      });
+      const page = await browser.newPage();
+      page.setDefaultTimeout(10000);
+      page.setDefaultNavigationTimeout(10000);
+
+      await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+      console.log('[OGP] Puppeteer page loaded');
+
+      const ogData = await page.evaluate(() => {
+        const getMetaContent = (property) => {
+          const meta = document.querySelector(`meta[property="${property}"]`);
+          return meta ? meta.getAttribute('content') : '';
+        };
+        return {
+          image: getMetaContent('og:image'),
+          title: getMetaContent('og:title'),
+          description: getMetaContent('og:description'),
+        };
+      });
+
+      console.log(`[OGP] Puppeteer Success - title: "${ogData.title}"`);
+      await browser.close();
+      return ogData;
+    } catch (err) {
+      console.log(`[OGP] Puppeteer error: ${err.message}`);
+      if (browser) await browser.close();
+      return null;
+    }
+  }
+
+  try {
+    // 1. cheerio で試す
+    let ogp = await fetchWithCheerio(url);
+
+    // 2. OGP が見つからなければ Puppeteer を試す
+    if (!ogp) {
+      console.log('[OGP] Trying Puppeteer...');
+      ogp = await fetchWithPuppeteer(url);
+    }
+
+    if (ogp && (ogp.image || ogp.title)) {
+      return res.json({
+        ok: true,
+        ogp: {
+          image: ogp.image || '',
+          title: ogp.title || '',
+          description: ogp.description || '',
+        },
+      });
+    } else {
+      return res.status(400).json({ error: 'No OGP data found' });
+    }
+  } catch (err) {
+    console.log(`[OGP] Final error: ${err.message}`);
+    return res.status(400).json({ error: err.message });
+  }
 });
 
 // 管理画面向けの詳細な利用状況

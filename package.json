@@ -9,6 +9,7 @@
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
     "express": "^4.19.2",
+    "puppeteer": "^21.6.0",
     "ws": "^8.18.0"
   }
 }
