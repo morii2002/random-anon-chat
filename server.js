@@ -258,6 +258,21 @@ function basicAuth(req, res, next) {
   res.status(401).send('認証が必要です');
 }
 
+// ===== 現在の利用状況 =====
+// トップページに表示する簡易な利用者数(認証不要・人数のみ)
+app.get('/api/stats', (req, res) => {
+  res.json({ online: clients.size });
+});
+
+// 管理画面向けの詳細な利用状況
+app.get('/admin/api/stats', basicAuth, (req, res) => {
+  res.json({
+    online: clients.size,
+    waiting: waitingQueue.length,
+    chatting: pairs.size / 2,
+  });
+});
+
 // 管理画面トップ(通報一覧)
 app.get('/admin', basicAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'admin', 'index.html'));
