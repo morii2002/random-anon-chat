@@ -32,6 +32,20 @@
   .empty { text-align: center; color: #999; padding: 40px 0; }
   .stats { display: flex; gap: 24px; background: white; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); font-size: 0.9rem; }
   .stats .item strong { font-size: 1.1rem; color: #4a47e0; margin-right: 4px; }
+  .section { background: white; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .section h2 { margin-top: 0; font-size: 1.05rem; }
+  .section p.help { color: #777; font-size: 0.85rem; margin-top: -6px; }
+  .aff-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .aff-form input { flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.9rem; }
+  .aff-form button { background: #4a47e0; color: white; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 0.9rem; }
+  .aff-list { list-style: none; padding: 0; margin: 0; }
+  .aff-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+  .aff-item:last-child { border-bottom: none; }
+  .aff-item .info { overflow: hidden; }
+  .aff-item .info .t { font-weight: bold; }
+  .aff-item .info .u { color: #888; font-size: 0.8rem; word-break: break-all; }
+  .aff-item .del-btn { background: #e05353; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 0.8rem; flex-shrink: 0; }
+  .aff-empty { color: #999; font-size: 0.9rem; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -44,6 +58,17 @@
       <div class="item">待機中: <strong id="statWaiting">-</strong>人</div>
       <div class="item">チャット中: <strong id="statChatting">-</strong>組</div>
     </div>
+    <div class="section">
+      <h2>アフィリエイトリンク管理(ユーザー画面サイドバー)</h2>
+      <p class="help">ここに登録したリンクが、ユーザー画面のサイドバー「おすすめ」欄に15分ごとに切り替わって表示されます。</p>
+      <form class="aff-form" id="affForm">
+        <input type="text" id="affText" placeholder="表示テキスト(例: おすすめサービスA)" maxlength="100" required />
+        <input type="url" id="affUrl" placeholder="リンクURL(https://...)" maxlength="500" required />
+        <button type="submit">追加</button>
+      </form>
+      <ul class="aff-list" id="affList"></ul>
+    </div>
+
     <div class="toolbar">
       <select id="filter">
         <option value="all">すべて表示</option>
@@ -145,10 +170,74 @@
       }
     }
 
+    // ===== アフィリエイトリンク管理 =====
+    const affForm = document.getElementById('affForm');
+    const affTextEl = document.getElementById('affText');
+    const affUrlEl = document.getElementById('affUrl');
+    const affListEl = document.getElementById('affList');
+
+    async function loadAffiliates() {
+      try {
+        const res = await fetch('/admin/api/affiliates');
+        const data = await res.json();
+        renderAffiliates(data.links || []);
+      } catch (e) {
+        affListEl.innerHTML = '<li class="aff-empty">読み込みに失敗しました</li>';
+      }
+    }
+
+    function renderAffiliates(links) {
+      if (links.length === 0) {
+        affListEl.innerHTML = '<li class="aff-empty">登録されたリンクはありません</li>';
+        return;
+      }
+      affListEl.innerHTML = '';
+      links.forEach((l) => {
+        const li = document.createElement('li');
+        li.className = 'aff-item';
+        li.innerHTML = `
+          <div class="info">
+            <div class="t">${escapeHtml(l.text)}</div>
+            <div class="u">${escapeHtml(l.url)}</div>
+          </div>
+          <button class="del-btn" data-id="${l.id}">削除</button>
+        `;
+        affListEl.appendChild(li);
+      });
+
+      affListEl.querySelectorAll('.del-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          await fetch(`/admin/api/affiliates/${btn.dataset.id}`, { method: 'DELETE' });
+          loadAffiliates();
+        });
+      });
+    }
+
+    affForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = affTextEl.value.trim();
+      const url = affUrlEl.value.trim();
+      if (!text || !url) return;
+      const res = await fetch('/admin/api/affiliates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, url }),
+      });
+      if (res.ok) {
+        affTextEl.value = '';
+        affUrlEl.value = '';
+        loadAffiliates();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || '追加に失敗しました');
+      }
+    });
+
     filterEl.addEventListener('change', loadReports);
     reloadBtn.addEventListener('click', () => { loadReports(); loadStats(); });
     loadReports();
     loadStats();
+    loadAffiliates();
     setInterval(loadStats, 5000);
   </script>
 </body>
