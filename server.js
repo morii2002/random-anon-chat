@@ -32,6 +32,10 @@ const MAX_ROOM_MESSAGES = 50;
 const reports = [];
 const MAX_REPORTS = 500;
 
+// アフィリエイトリンク (画面1のサイドバーに一定間隔でローテーション表示)
+const affiliateLinks = []; // { id, text, url }
+const AFFILIATE_ROTATE_MS = 15 * 60 * 1000; // 15分
+
 function send(client, data) {
   if (client && client.readyState === client.OPEN) {
     client.send(JSON.stringify(data));
@@ -295,6 +299,48 @@ app.post('/admin/api/reports/:id/status', basicAuth, (req, res) => {
   }
   report.status = status;
   res.json({ ok: true, report });
+});
+
+// ===== アフィリエイトリンク =====
+// ユーザー画面(画面1サイドバー)に表示する、現在の時間帯に対応するリンクを返す
+app.get('/api/affiliate', (req, res) => {
+  if (affiliateLinks.length === 0) {
+    return res.json({ link: null });
+  }
+  const index = Math.floor(Date.now() / AFFILIATE_ROTATE_MS) % affiliateLinks.length;
+  res.json({ link: affiliateLinks[index] });
+});
+
+// 管理画面: アフィリエイトリンク一覧取得
+app.get('/admin/api/affiliates', basicAuth, (req, res) => {
+  res.json({ links: affiliateLinks });
+});
+
+// 管理画面: アフィリエイトリンク追加
+app.post('/admin/api/affiliates', basicAuth, (req, res) => {
+  const text = String((req.body && req.body.text) || '').trim().slice(0, 100);
+  const url = String((req.body && req.body.url) || '').trim().slice(0, 500);
+
+  if (!text || !url) {
+    return res.status(400).json({ error: 'text and url are required' });
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: 'url must start with http:// or https://' });
+  }
+
+  const link = { id: crypto.randomUUID(), text, url };
+  affiliateLinks.push(link);
+  res.json({ ok: true, link });
+});
+
+// 管理画面: アフィリエイトリンク削除
+app.delete('/admin/api/affiliates/:id', basicAuth, (req, res) => {
+  const idx = affiliateLinks.findIndex((l) => l.id === req.params.id);
+  if (idx === -1) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  affiliateLinks.splice(idx, 1);
+  res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 3000;
