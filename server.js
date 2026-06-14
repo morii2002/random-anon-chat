@@ -1,4 +1,4 @@
-// 匿名ランダムチャット サーバー
+// 匿名ランダムチャット サーバー (Chat Now)
 // Node.js + ws (WebSocket) + Express(静的ファイル配信)
 
 const express = require('express');
@@ -8,6 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const app = express();
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
@@ -21,6 +22,15 @@ const clients = new Map();
 
 // ペア情報 (id -> partnerId)
 const pairs = new Map();
+
+// ルーム単位の直近メッセージ(通報時に会話内容を保存するために保持)
+const rooms = new Map(); // roomId -> { messages: [{ from: 'a'|'b', text, time }] }
+const clientRoom = new Map(); // clientId -> roomId
+const MAX_ROOM_MESSAGES = 50;
+
+// 通報一覧(通報された会話だけをここに保存する。全チャットは保存しない)
+const reports = [];
+const MAX_REPORTS = 500;
 
 function send(client, data) {
   if (client && client.readyState === client.OPEN) {
@@ -48,12 +58,18 @@ function tryMatch() {
     pairs.set(a.id, b.id);
     pairs.set(b.id, a.id);
 
+    // 新しいルームを作成し、直近メッセージのバッファを用意
+    const roomId = crypto.randomUUID();
+    rooms.set(roomId, { messages: [] });
+    clientRoom.set(a.id, roomId);
+    clientRoom.set(b.id, roomId);
+
     send(a, { type: 'matched' });
     send(b, { type: 'matched' });
   }
 }
 
-// ペア解消 + 通知
+// ペア解消 + 通知 + ルーム情報のクリーンアップ
 function disconnectPair(id, notifyPartner = true) {
   const partnerId = pairs.get(id);
   if (partnerId) {
@@ -63,6 +79,13 @@ function disconnectPair(id, notifyPartner = true) {
       const partner = clients.get(partnerId);
       send(partner, { type: 'partner_left' });
     }
+  }
+
+  const roomId = clientRoom.get(id);
+  if (roomId) {
+    rooms.delete(roomId);
+    clientRoom.delete(id);
+    if (partnerId) clientRoom.delete(partnerId);
   }
 }
 
@@ -104,6 +127,18 @@ wss.on('connection', (ws) => {
           const text = String(msg.text || '').slice(0, 1000);
           if (text.trim().length > 0) {
             send(partner, { type: 'message', text });
+
+            // 通報時に確認できるよう、ルームの直近メッセージを保持
+            const roomId = clientRoom.get(ws.id);
+            if (roomId) {
+              const room = rooms.get(roomId);
+              if (room) {
+                room.messages.push({ from: ws.id, text, time: Date.now() });
+                if (room.messages.length > MAX_ROOM_MESSAGES) {
+                  room.messages.shift();
+                }
+              }
+            }
           }
         }
         break;
@@ -135,9 +170,34 @@ wss.on('connection', (ws) => {
       }
 
       case 'report': {
-        // 通報受付(ログのみ。実運用では永続化・管理画面連携を推奨)
+        // 通報受付: そのルームの直近会話をスナップショットして保存
         const partnerId = pairs.get(ws.id);
-        console.warn(`[REPORT] from=${ws.id} target=${partnerId || 'unknown'} reason=${msg.reason || ''}`);
+        const roomId = clientRoom.get(ws.id);
+        const room = roomId ? rooms.get(roomId) : null;
+        const transcript = room
+          ? room.messages.map((m) => ({
+              from: m.from === ws.id ? '通報者' : '相手',
+              text: m.text,
+              time: m.time,
+            }))
+          : [];
+
+        const report = {
+          id: crypto.randomUUID(),
+          time: Date.now(),
+          reporterId: ws.id,
+          targetId: partnerId || null,
+          reason: String(msg.reason || '').slice(0, 500),
+          transcript,
+          status: 'open',
+        };
+
+        reports.unshift(report);
+        if (reports.length > MAX_REPORTS) {
+          reports.length = MAX_REPORTS;
+        }
+
+        console.warn(`[REPORT] id=${report.id} from=${ws.id} target=${partnerId || 'unknown'} reason=${report.reason}`);
         send(ws, { type: 'report_received' });
         break;
       }
@@ -173,6 +233,54 @@ const interval = setInterval(() => {
 }, 30000);
 
 wss.on('close', () => clearInterval(interval));
+
+// ===== 管理画面 (Basic認証で保護) =====
+// 環境変数 ADMIN_USER / ADMIN_PASS を設定して利用してください。
+// 未設定の場合はデフォルト値(admin / changeme)が使われるため、本番では必ず設定すること。
+function basicAuth(req, res, next) {
+  const user = process.env.ADMIN_USER || 'admin';
+  const pass = process.env.ADMIN_PASS || 'changeme';
+
+  const authHeader = req.headers.authorization || '';
+  const [scheme, encoded] = authHeader.split(' ');
+
+  if (scheme === 'Basic' && encoded) {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    const sepIndex = decoded.indexOf(':');
+    const reqUser = decoded.slice(0, sepIndex);
+    const reqPass = decoded.slice(sepIndex + 1);
+    if (reqUser === user && reqPass === pass) {
+      return next();
+    }
+  }
+
+  res.set('WWW-Authenticate', 'Basic realm="Chat Now Admin"');
+  res.status(401).send('認証が必要です');
+}
+
+// 管理画面トップ(通報一覧)
+app.get('/admin', basicAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin', 'index.html'));
+});
+
+// 通報一覧API
+app.get('/admin/api/reports', basicAuth, (req, res) => {
+  res.json({ reports });
+});
+
+// 通報の対応済み/未対応切り替え
+app.post('/admin/api/reports/:id/status', basicAuth, (req, res) => {
+  const report = reports.find((r) => r.id === req.params.id);
+  if (!report) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  const status = req.body && req.body.status;
+  if (status !== 'open' && status !== 'resolved') {
+    return res.status(400).json({ error: 'invalid status' });
+  }
+  report.status = status;
+  res.json({ ok: true, report });
+});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

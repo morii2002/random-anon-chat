@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: chatpat-random-chat
+    name: chat-now
     runtime: node
     plan: free
     buildCommand: npm install
@@ -8,3 +8,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false

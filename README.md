@@ -1,4 +1,4 @@
-# ChatPat - 匿名ランダムチャット(プロトタイプ)
+# Chat Now - 匿名ランダムチャット(プロトタイプ)
 
 テキストベースの匿名1対1ランダムマッチングチャットです。Node.js + WebSocket (ws) + Express で構成。
 
@@ -6,8 +6,10 @@
 
 ```
 .
-├── server.js        # WebSocketサーバー(マッチング・中継ロジック)
+├── server.js        # WebSocketサーバー(マッチング・中継・通報ロジック)
 ├── package.json
+├── admin/
+│   └── index.html   # 管理画面(通報一覧)
 └── public/
     ├── index.html   # 画面(スタート画面・チャット画面・広告枠)
     ├── style.css
@@ -31,9 +33,32 @@ npm start
 - 「入力中...」表示
 - スキップ(別の相手と再マッチング)
 - 終了(キューから抜ける)
-- 通報ボタン(サーバーログに記録するのみの簡易実装)
+- 通報ボタン(通報時点までの会話を保存し、管理画面で確認可能)
 - 利用ルールへの同意チェック(18歳未満禁止の明記)
 - 広告枠(上部・サイドバー・下部)とアフィリエイトリンク枠をUIに用意
+- パスワード保護された管理画面(通報内容の確認・対応状況の管理)
+
+## 通報した場合の挙動
+
+利用者が「通報」ボタンを押すと、以下が行われます。
+
+1. その会話ルームで直近に交換された最大50件のメッセージ(通報した側を「通報者」、相手を「相手」として記録)をスナップショットとして保存します。
+2. 通報時刻・通報理由(任意入力)とともに、サーバー内の通報一覧に追加されます。
+3. 通報した本人には「通報を受け付けました」というメッセージが表示されます。
+4. 通報されなかった通常の会話内容は、サーバーに保存・記録されません(通報があった会話のみを保存する設計)。
+
+保存された通報内容は管理画面(`/admin`)で確認できます。なお、サーバーは無料プランではメモリ上にのみデータを保持するため、サービス再起動(再デプロイ・スリープ復帰など)で通報データは消えます。長期保存が必要な場合はデータベース等への保存が必要です。
+
+## 管理画面(通報確認)
+
+`https://<あなたのRenderのURL>/admin` にアクセスすると、通報一覧と会話内容を確認できる管理画面が開きます。
+
+- アクセスにはBasic認証(ユーザー名・パスワード)が必要です。
+- Renderの管理画面 (Dashboard → 該当サービス → Environment) で以下の環境変数を設定してください。
+  - `ADMIN_USER` : 管理画面のログインユーザー名
+  - `ADMIN_PASS` : 管理画面のログインパスワード
+- 未設定の場合は `admin` / `changeme` がデフォルト値として使われます。**本番運用では必ず変更してください。**
+- 管理画面では、各通報について「対応済みにする」「未対応に戻す」の切り替えができます。
 
 ## マネタイズ(広告・アフィリエイト)の組み込み方
 
@@ -41,6 +66,30 @@ npm start
 
 - `.ad-top` / `.ad-bottom` / `.ad-side` : Google AdSense や A8.net などの広告タグを設置
 - `.affiliate-box` 内の `<a class="aff-link">` : アフィリエイトリンクのURLとテキストを差し替え
+
+### 具体例
+
+例えば `.ad-top` の広告枠(`<div class="ad-slot ad-top">広告枠(上部)</div>`)を、Google AdSenseの広告タグに置き換える場合:
+
+```html
+<div class="ad-slot ad-top">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX"
+   crossorigin="anonymous"></script>
+  <ins class="adsbygoogle"
+   style="display:block"
+   data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
+   data-ad-slot="XXXXXXXXXX"
+   data-ad-format="auto"
+   data-full-width-responsive="true"></ins>
+  <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+</div>
+```
+
+アフィリエイトリンクの場合は、`<a href="#" class="aff-link">サンプルリンク →</a>` の `href` を実際のアフィリエイトURLに、リンク文言を商品名などに置き換えるだけです。
+
+```html
+<a href="https://example-affiliate.com/your-link" class="aff-link" target="_blank" rel="noopener noreferrer">おすすめサービスを見る →</a>
+```
 
 広告審査(特にAdSense)では、運営者情報・プライバシーポリシー・利用規約・問い合わせ先の明記が求められることが多いので、別途ページを用意してください。
 

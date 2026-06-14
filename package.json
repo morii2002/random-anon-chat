@@ -1,5 +1,5 @@
 {
-  "name": "chatpat-random-chat",
+  "name": "chat-now",
   "version": "1.0.0",
   "description": "匿名ランダムチャット プロトタイプ",
   "main": "server.js",
